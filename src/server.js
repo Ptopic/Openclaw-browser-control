@@ -20,10 +20,27 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/debug/headers', (req, res) => {
+  res.json({
+    host: req.get('host'),
+    xForwardedHost: req.get('x-forwarded-host'),
+    xForwardedProto: req.get('x-forwarded-proto'),
+    protocol: req.protocol,
+    allHeaders: req.headers
+  });
+});
+
 app.get('/debug/config', (_req, res) => {
   res.json({
     cdpHttpUrl: config.cdpHttpUrl,
     cdpHttpUrlCandidates: config.cdpHttpUrlCandidates,
+    publicBaseUrl: config.publicBaseUrl,
+    screencast: {
+      format: config.screencastFormat,
+      quality: config.screencastQuality,
+      maxWidth: config.screencastMaxWidth,
+      maxHeight: config.screencastMaxHeight,
+    },
   });
 });
 
@@ -45,13 +62,17 @@ app.get('/debug/cdp', async (_req, res) => {
 app.post('/sessions', async (req, res) => {
   try {
     const pageUrl = req.body?.url || 'https://example.com';
-    const live = new LiveSession({ pageUrl });
+    const device = req.body?.device === 'desktop' ? 'desktop' : 'mobile';
+    const live = new LiveSession({ pageUrl, device });
     await live.start();
-    const session = store.create({ pageUrl });
+    const session = store.create({ pageUrl, device });
     liveSessions.set(session.id, live);
     const token = store.sign(session);
-    const handoffUrl = `${config.publicBaseUrl.replace(/\/$/, '')}/session/${token}`;
-    res.json({ sessionId: session.id, handoffUrl, expiresAt: session.expiresAt, pageUrl });
+    // Always use forwarded headers from Traefik/proxy
+    const proto = req.get('x-forwarded-proto') || 'https';
+    const host = req.get('x-forwarded-host') || req.get('host');
+    const handoffUrl = `${proto}://${host}/session/${token}`;
+    res.json({ sessionId: session.id, handoffUrl, expiresAt: session.expiresAt, pageUrl, device });
   } catch (error) {
     res.status(500).json({ error: error.message || String(error) });
   }
@@ -103,13 +124,14 @@ wss.on('connection', (ws) => {
     return;
   }
   live.addClient(ws);
-  ws.send(JSON.stringify({ type: 'ready', width: config.mobileWidth, height: config.mobileHeight }));
+  const viewport = live.getViewportSettings();
+  ws.send(JSON.stringify({ type: 'ready', device: live.device, ...viewport }));
 
   ws.on('message', async (buf) => {
     try {
       const msg = JSON.parse(buf.toString());
       if (msg.type === 'tap') await live.dispatchTap(msg.x, msg.y);
-      else if (msg.type === 'scroll') await live.dispatchScroll(msg.deltaY, msg.x, msg.y);
+      else if (msg.type === 'scroll') await live.dispatchScroll(msg.deltaY, msg.x, msg.y, msg.deltaX || 0);
       else if (msg.type === 'text') await live.insertText(msg.text || '');
       else if (msg.type === 'key') await live.key(msg.key);
       else if (msg.type === 'back') await live.navigateBack();
