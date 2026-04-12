@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Live browser handoff</title>
+  <style>
+    :root { --bg:#0b1020; --panel:#121933; --text:#f5f7ff; --muted:#93a0c5; --btn:#2a3766; --primary:#5b8cff; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter,system-ui,sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width:920px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; }
+    .toolbar { position:sticky; top:0; z-index:10; display:grid; grid-template-columns:repeat(4,1fr); gap:8px; padding:12px; background:rgba(11,16,32,.92); backdrop-filter:blur(10px); }
+    button { min-height:48px; border:0; border-radius:14px; color:var(--text); background:var(--btn); font-weight:700; }
+    button.primary { background:var(--primary); }
+    .viewer { padding:12px; display:flex; justify-content:center; align-items:center; flex:1; }
+    canvas { width:100%; max-width:900px; background:#000; border-radius:18px; touch-action:none; }
+    .status { padding:0 14px 12px; color:var(--muted); font-size:14px; }
+    .kbd { display:none; padding:12px; gap:8px; }
+    .kbd.show { display:flex; }
+    .kbd input { flex:1; min-height:46px; border-radius:12px; border:1px solid #2c3965; padding:0 12px; font-size:16px; background:#0d1530; color:var(--text); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="toolbar">
+      <button id="back">Back</button>
+      <button id="reload">Refresh</button>
+      <button id="keyboard">Keyboard</button>
+      <button class="primary" id="done">Done</button>
+    </div>
+    <div class="kbd" id="kbdWrap">
+      <input id="textInput" placeholder="Type text here" />
+      <button id="sendText">Send</button>
+      <button id="enterKey">Enter</button>
+    </div>
+    <div class="viewer">
+      <canvas id="screen" width="390" height="844"></canvas>
+    </div>
+    <div class="status" id="status">Connecting…</div>
+  </div>
+  <script>
+    const token = location.pathname.split('/').pop();
+    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${wsProto}//${location.host}/ws/${token}`);
+    const canvas = document.getElementById('screen');
+    const ctx = canvas.getContext('2d');
+    const statusEl = document.getElementById('status');
+    const input = document.getElementById('textInput');
+    const kbdWrap = document.getElementById('kbdWrap');
+    let frameW = canvas.width, frameH = canvas.height;
+
+    function send(obj){ ws.send(JSON.stringify(obj)); }
+    function mapPoint(clientX, clientY){
+      const rect = canvas.getBoundingClientRect();
+      const x = ((clientX - rect.left) / rect.width) * frameW;
+      const y = ((clientY - rect.top) / rect.height) * frameH;
+      return { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)) };
+    }
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'ready') {
+        frameW = msg.width; frameH = msg.height; canvas.width = frameW; canvas.height = frameH;
+        statusEl.textContent = 'Connected';
+      } else if (msg.type === 'frame') {
+        const img = new Image();
+        img.onload = () => { frameW = img.width; frameH = img.height; canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img, 0, 0); };
+        img.src = `data:image/jpeg;base64,${msg.data}`;
+      } else if (msg.type === 'status') {
+        statusEl.textContent = `Session ${msg.status}`;
+      } else if (msg.type === 'error') {
+        statusEl.textContent = `Error: ${msg.message}`;
+      }
+    };
+    ws.onclose = () => { statusEl.textContent = 'Disconnected'; };
+
+    let lastTap = null;
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const t = e.touches[0]; if (!t) return;
+      lastTap = mapPoint(t.clientX, t.clientY);
+    }, { passive:false });
+    canvas.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (lastTap) send({ type:'tap', ...lastTap });
+      lastTap = null;
+    }, { passive:false });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const p = mapPoint(e.clientX, e.clientY);
+      send({ type:'scroll', deltaY: e.deltaY, ...p });
+    }, { passive:false });
+
+    document.getElementById('back').onclick = () => send({ type:'back' });
+    document.getElementById('reload').onclick = () => send({ type:'reload' });
+    document.getElementById('done').onclick = () => { send({ type:'complete' }); statusEl.textContent = 'Marked done'; };
+    document.getElementById('keyboard').onclick = () => kbdWrap.classList.toggle('show');
+    document.getElementById('sendText').onclick = () => { if (input.value) send({ type:'text', text: input.value }); input.value=''; };
+    document.getElementById('enterKey').onclick = () => send({ type:'key', key:'Enter' });
+  </script>
+</body>
+</html>
