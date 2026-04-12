@@ -76,8 +76,12 @@ export class CDPConnection {
     });
     this.ws.on('message', (buf) => this.#onMessage(buf.toString()));
     this.ws.on('close', () => {
+      console.log(`[CDP] WebSocket closed for ${this.wsUrl}`);
       for (const { reject } of this.pending.values()) reject(new Error('CDP socket closed'));
       this.pending.clear();
+    });
+    this.ws.on('error', (err) => {
+      console.error(`[CDP] WebSocket error: ${err.message}`);
     });
     return this;
   }

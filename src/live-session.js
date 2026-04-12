@@ -122,7 +122,9 @@ export class LiveSession {
       maxHeight: config.screencastMaxHeight,
       everyNthFrame: config.screencastEveryNthFrame,
     };
+    console.log(`[LiveSession ${this.device}] Starting screencast with settings:`, JSON.stringify(screencastSettings));
     await this.connection.send('Page.startScreencast', screencastSettings, this.sessionId);
+    console.log(`[LiveSession ${this.device}] Page.startScreencast OK`);
   }
 
   addClient(ws) {
