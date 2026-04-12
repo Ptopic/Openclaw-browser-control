@@ -14,13 +14,18 @@ export const config = {
   mobileWidth: Number(process.env.MOBILE_WIDTH || 390),
   mobileHeight: Number(process.env.MOBILE_HEIGHT || 844),
   deviceScaleFactor: Number(process.env.DEVICE_SCALE_FACTOR || 2),
-  // Desktop viewport
+  // Desktop viewport (720p for better performance)
   desktopWidth: Number(process.env.DESKTOP_WIDTH || 1280),
-  desktopHeight: Number(process.env.DESKTOP_HEIGHT || 800),
+  desktopHeight: Number(process.env.DESKTOP_HEIGHT || 720),
+  // Mobile screencast (high quality)
   screencastFormat: process.env.SCREENCAST_FORMAT || 'jpeg',
   screencastQuality: Number(process.env.SCREENCAST_QUALITY || 85),
   screencastMaxWidth: Number(process.env.SCREENCAST_MAX_WIDTH || 1440),
   screencastMaxHeight: Number(process.env.SCREENCAST_MAX_HEIGHT || 3120),
+  // Desktop screencast (lower quality for slow internet)
+  desktopScreencastQuality: Number(process.env.DESKTOP_SCREENCAST_QUALITY || 70),
+  desktopScreencastMaxWidth: Number(process.env.DESKTOP_SCREENCAST_MAX_WIDTH || 1280),
+  desktopScreencastMaxHeight: Number(process.env.DESKTOP_SCREENCAST_MAX_HEIGHT || 720),
   screencastEveryNthFrame: Number(process.env.SCREENCAST_EVERY_NTH_FRAME || 1),
   sessionTtlSeconds: Number(process.env.SESSION_TTL_SECONDS || 1800),
 };

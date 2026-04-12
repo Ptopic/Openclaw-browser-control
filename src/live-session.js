@@ -85,13 +85,22 @@ export class LiveSession {
     const viewport = this.getViewportSettings();
     await this.connection.send('Emulation.setDeviceMetricsOverride', viewport, this.sessionId);
     await this.connection.send('Page.navigate', { url: this.pageUrl }, this.sessionId).catch(() => {});
-    await this.connection.send('Page.startScreencast', {
+    
+    // Use device-specific screencast settings
+    const screencastSettings = this.device === 'desktop' ? {
+      format: config.screencastFormat,
+      quality: config.desktopScreencastQuality,
+      maxWidth: config.desktopScreencastMaxWidth,
+      maxHeight: config.desktopScreencastMaxHeight,
+      everyNthFrame: config.screencastEveryNthFrame,
+    } : {
       format: config.screencastFormat,
       quality: config.screencastQuality,
       maxWidth: config.screencastMaxWidth,
       maxHeight: config.screencastMaxHeight,
       everyNthFrame: config.screencastEveryNthFrame,
-    }, this.sessionId);
+    };
+    await this.connection.send('Page.startScreencast', screencastSettings, this.sessionId);
   }
 
   addClient(ws) {
