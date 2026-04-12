@@ -50,7 +50,11 @@ app.post('/sessions', async (req, res) => {
     const session = store.create({ pageUrl });
     liveSessions.set(session.id, live);
     const token = store.sign(session);
-    const handoffUrl = `${config.publicBaseUrl.replace(/\/$/, '')}/session/${token}`;
+    // Use request host if PUBLIC_BASE_URL not set or still default
+    const baseUrl = (config.publicBaseUrl && !config.publicBaseUrl.includes('localhost'))
+      ? config.publicBaseUrl.replace(/\/$/, '')
+      : `${req.protocol}://${req.get('host')}`;
+    const handoffUrl = `${baseUrl}/session/${token}`;
     res.json({ sessionId: session.id, handoffUrl, expiresAt: session.expiresAt, pageUrl });
   } catch (error) {
     res.status(500).json({ error: error.message || String(error) });
