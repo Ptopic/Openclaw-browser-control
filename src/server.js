@@ -62,16 +62,17 @@ app.get('/debug/cdp', async (_req, res) => {
 app.post('/sessions', async (req, res) => {
   try {
     const pageUrl = req.body?.url || 'https://example.com';
-    const live = new LiveSession({ pageUrl });
+    const device = req.body?.device === 'desktop' ? 'desktop' : 'mobile';
+    const live = new LiveSession({ pageUrl, device });
     await live.start();
-    const session = store.create({ pageUrl });
+    const session = store.create({ pageUrl, device });
     liveSessions.set(session.id, live);
     const token = store.sign(session);
     // Always use forwarded headers from Traefik/proxy
     const proto = req.get('x-forwarded-proto') || 'https';
     const host = req.get('x-forwarded-host') || req.get('host');
     const handoffUrl = `${proto}://${host}/session/${token}`;
-    res.json({ sessionId: session.id, handoffUrl, expiresAt: session.expiresAt, pageUrl });
+    res.json({ sessionId: session.id, handoffUrl, expiresAt: session.expiresAt, pageUrl, device });
   } catch (error) {
     res.status(500).json({ error: error.message || String(error) });
   }
@@ -123,7 +124,8 @@ wss.on('connection', (ws) => {
     return;
   }
   live.addClient(ws);
-  ws.send(JSON.stringify({ type: 'ready', width: config.mobileWidth, height: config.mobileHeight }));
+  const viewport = live.getViewportSettings();
+  ws.send(JSON.stringify({ type: 'ready', device: live.device, ...viewport }));
 
   ws.on('message', async (buf) => {
     try {

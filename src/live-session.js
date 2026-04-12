@@ -2,14 +2,36 @@ import { attachToPageAny } from './cdp.js';
 import { config } from './config.js';
 
 export class LiveSession {
-  constructor({ pageUrl }) {
+  constructor({ pageUrl, device = 'mobile' }) {
     this.pageUrl = pageUrl;
+    this.device = device;
     this.connection = null;
     this.sessionId = null;
     this.target = null;
     this.clients = new Set();
     this.lastFrame = null;
     this.lastMetadata = null;
+  }
+
+  getViewportSettings() {
+    if (this.device === 'desktop') {
+      return {
+        width: config.desktopWidth,
+        height: config.desktopHeight,
+        deviceScaleFactor: 1,
+        mobile: false,
+        screenWidth: config.desktopWidth,
+        screenHeight: config.desktopHeight,
+      };
+    }
+    return {
+      width: config.mobileWidth,
+      height: config.mobileHeight,
+      deviceScaleFactor: config.deviceScaleFactor,
+      mobile: true,
+      screenWidth: config.mobileWidth,
+      screenHeight: config.mobileHeight,
+    };
   }
 
   async start() {
@@ -60,14 +82,8 @@ export class LiveSession {
 
     await this.connection.send('Page.enable', {}, this.sessionId);
     await this.connection.send('Runtime.enable', {}, this.sessionId);
-    await this.connection.send('Emulation.setDeviceMetricsOverride', {
-      width: config.mobileWidth,
-      height: config.mobileHeight,
-      deviceScaleFactor: config.deviceScaleFactor,
-      mobile: true,
-      screenWidth: config.mobileWidth,
-      screenHeight: config.mobileHeight,
-    }, this.sessionId);
+    const viewport = this.getViewportSettings();
+    await this.connection.send('Emulation.setDeviceMetricsOverride', viewport, this.sessionId);
     await this.connection.send('Page.navigate', { url: this.pageUrl }, this.sessionId).catch(() => {});
     await this.connection.send('Page.startScreencast', {
       format: config.screencastFormat,
@@ -95,14 +111,33 @@ export class LiveSession {
   }
 
   async dispatchTap(x, y) {
-    await this.connection.send('Input.dispatchTouchEvent', {
-      type: 'touchStart',
-      touchPoints: [{ x, y, radiusX: 1, radiusY: 1, force: 1, id: 1 }],
-    }, this.sessionId);
-    await this.connection.send('Input.dispatchTouchEvent', {
-      type: 'touchEnd',
-      touchPoints: [],
-    }, this.sessionId);
+    if (this.device === 'desktop') {
+      // Use mouse events for desktop
+      await this.connection.send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x,
+        y,
+        button: 'left',
+        clickCount: 1,
+      }, this.sessionId);
+      await this.connection.send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x,
+        y,
+        button: 'left',
+        clickCount: 1,
+      }, this.sessionId);
+    } else {
+      // Use touch events for mobile
+      await this.connection.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ x, y, radiusX: 1, radiusY: 1, force: 1, id: 1 }],
+      }, this.sessionId);
+      await this.connection.send('Input.dispatchTouchEvent', {
+        type: 'touchEnd',
+        touchPoints: [],
+      }, this.sessionId);
+    }
   }
 
   async dispatchScroll(deltaY, x, y, deltaX = 0) {

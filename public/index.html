@@ -8,16 +8,22 @@
     :root { --bg:#0b1020; --panel:#121933; --text:#f5f7ff; --muted:#93a0c5; --btn:#2a3766; --primary:#5b8cff; }
     * { box-sizing:border-box; }
     body { margin:0; font-family:Inter,system-ui,sans-serif; background:var(--bg); color:var(--text); }
-    .wrap { max-width:920px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; }
+    .wrap { max-width:100vw; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; }
     .toolbar { position:sticky; top:0; z-index:10; display:grid; grid-template-columns:repeat(4,1fr); gap:8px; padding:12px; background:rgba(11,16,32,.92); backdrop-filter:blur(10px); }
-    button { min-height:48px; border:0; border-radius:14px; color:var(--text); background:var(--btn); font-weight:700; }
+    button { min-height:48px; min-width:48px; border:0; border-radius:14px; color:var(--text); background:var(--btn); font-weight:700; font-size:16px; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+    button:active { opacity:0.7; transform:scale(0.98); }
     button.primary { background:var(--primary); }
-    .viewer { padding:12px; display:flex; justify-content:center; align-items:center; flex:1; }
-    canvas { width:100%; max-width:900px; background:#000; border-radius:18px; touch-action:none; }
+    .viewer { padding:12px; display:flex; justify-content:center; align-items:center; flex:1; overflow:auto; }
+    canvas { background:#000; border-radius:18px; touch-action:none; max-width:100%; height:auto; }
     .status { padding:0 14px 12px; color:var(--muted); font-size:14px; }
     .kbd { display:none; padding:12px; gap:8px; }
     .kbd.show { display:flex; }
     .kbd input { flex:1; min-height:46px; border-radius:12px; border:1px solid #2c3965; padding:0 12px; font-size:16px; background:#0d1530; color:var(--text); }
+    .device-badge { padding:4px 10px; background:var(--btn); border-radius:8px; font-size:12px; margin-left:8px; }
+    /* Desktop-specific styles */
+    .desktop .wrap { max-width:1400px; }
+    .desktop .viewer { padding:20px; }
+    .desktop canvas { max-width:100%; max-height:80vh; }
   </style>
 </head>
 <body>
@@ -36,7 +42,7 @@
     <div class="viewer">
       <canvas id="screen" width="390" height="844"></canvas>
     </div>
-    <div class="status" id="status">Connecting…</div>
+    <div class="status" id="status">Connecting…<span class="device-badge" id="deviceBadge"></span></div>
   </div>
   <script>
     const token = location.pathname.split('/').pop();
@@ -45,9 +51,11 @@
     const canvas = document.getElementById('screen');
     const ctx = canvas.getContext('2d');
     const statusEl = document.getElementById('status');
+    const deviceBadge = document.getElementById('deviceBadge');
     const input = document.getElementById('textInput');
     const kbdWrap = document.getElementById('kbdWrap');
     let frameW = canvas.width, frameH = canvas.height;
+    let currentDevice = 'mobile';
 
     function send(obj){ ws.send(JSON.stringify(obj)); }
     function mapPoint(clientX, clientY){
@@ -57,14 +65,40 @@
       return { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)) };
     }
 
+    // Button handlers - work on both desktop and mobile
+    function addButtonHandler(id, handler) {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', handler);
+      btn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handler(e);
+      });
+    }
+
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
       if (msg.type === 'ready') {
-        frameW = msg.width; frameH = msg.height; canvas.width = frameW; canvas.height = frameH;
-        statusEl.textContent = 'Connected';
+        frameW = msg.width; 
+        frameH = msg.height; 
+        canvas.width = frameW; 
+        canvas.height = frameH;
+        currentDevice = msg.device || 'mobile';
+        deviceBadge.textContent = currentDevice === 'desktop' ? 'Desktop' : 'Mobile';
+        if (currentDevice === 'desktop') {
+          document.body.classList.add('desktop');
+        }
+        statusEl.innerHTML = `Connected <span class="device-badge">${currentDevice === 'desktop' ? 'Desktop' : 'Mobile'}</span>`;
       } else if (msg.type === 'frame') {
         const img = new Image();
-        img.onload = () => { frameW = img.width; frameH = img.height; canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img, 0, 0); };
+        img.onload = () => { 
+          frameW = img.width; 
+          frameH = img.height; 
+          canvas.width = img.width; 
+          canvas.height = img.height; 
+          ctx.drawImage(img, 0, 0); 
+        };
         img.src = `data:image/jpeg;base64,${msg.data}`;
       } else if (msg.type === 'status') {
         statusEl.textContent = `Session ${msg.status}`;
@@ -74,47 +108,116 @@
     };
     ws.onclose = () => { statusEl.textContent = 'Disconnected'; };
 
+    // Touch handling for canvas
     let lastTap = null;
     let lastTouch = null;
+    let touchStartTime = 0;
+    let touchMoved = false;
+    
     canvas.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      const t = e.touches[0]; if (!t) return;
-      lastTap = mapPoint(t.clientX, t.clientY);
-      lastTouch = { ...lastTap, time: Date.now() };
+      const t = e.touches[0]; 
+      if (!t) return;
+      const p = mapPoint(t.clientX, t.clientY);
+      lastTap = p;
+      lastTouch = { ...p };
+      touchStartTime = Date.now();
+      touchMoved = false;
     }, { passive:false });
+    
     canvas.addEventListener('touchmove', (e) => {
       e.preventDefault();
-      const t = e.touches[0]; if (!t || !lastTouch) return;
+      const t = e.touches[0]; 
+      if (!t || !lastTouch) return;
       const p = mapPoint(t.clientX, t.clientY);
       const deltaY = lastTouch.y - p.y;
       const deltaX = lastTouch.x - p.x;
       // Only send scroll if moved significantly
-      if (Math.abs(deltaY) > 5 || Math.abs(deltaX) > 5) {
+      if (Math.abs(deltaY) > 3 || Math.abs(deltaX) > 3) {
+        touchMoved = true;
         send({ type:'scroll', deltaY: deltaY * 2, deltaX: deltaX * 2, x: p.x, y: p.y });
-        lastTouch = { ...p, time: Date.now() };
-        lastTap = null; // Cancel tap on scroll
+        lastTouch = { ...p };
       }
     }, { passive:false });
+    
     canvas.addEventListener('touchend', (e) => {
       e.preventDefault();
-      // Only send tap if we didn't scroll (lastTap still set)
-      if (lastTap) send({ type:'tap', ...lastTap });
+      // Only send tap if we didn't scroll and it was a quick tap
+      const touchDuration = Date.now() - touchStartTime;
+      if (lastTap && !touchMoved && touchDuration < 500) {
+        send({ type:'tap', ...lastTap });
+      }
       lastTap = null;
       lastTouch = null;
+      touchMoved = false;
     }, { passive:false });
+
+    // Desktop mouse support
+    let isMouseDown = false;
+    let mouseStartPos = null;
+    let mouseMoved = false;
+    
+    canvas.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      isMouseDown = true;
+      mouseStartPos = mapPoint(e.clientX, e.clientY);
+      mouseMoved = false;
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+      if (!isMouseDown || !mouseStartPos) return;
+      const p = mapPoint(e.clientX, e.clientY);
+      const deltaY = mouseStartPos.y - p.y;
+      const deltaX = mouseStartPos.x - p.x;
+      if (Math.abs(deltaY) > 3 || Math.abs(deltaX) > 3) {
+        mouseMoved = true;
+        send({ type:'scroll', deltaY: deltaY * 1.5, deltaX: deltaX * 1.5, x: p.x, y: p.y });
+        mouseStartPos = p;
+      }
+    });
+    
+    canvas.addEventListener('mouseup', (e) => {
+      e.preventDefault();
+      if (isMouseDown && !mouseMoved && mouseStartPos) {
+        send({ type:'tap', ...mouseStartPos });
+      }
+      isMouseDown = false;
+      mouseStartPos = null;
+      mouseMoved = false;
+    });
+    
+    canvas.addEventListener('click', (e) => {
+      // For desktop, also send tap on click
+      if (currentDevice === 'desktop' && !mouseMoved) {
+        const p = mapPoint(e.clientX, e.clientY);
+        send({ type:'tap', ...p });
+      }
+    });
 
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const p = mapPoint(e.clientX, e.clientY);
-      send({ type:'scroll', deltaY: e.deltaY, ...p });
+      send({ type:'scroll', deltaY: e.deltaY, deltaX: e.deltaX || 0, ...p });
     }, { passive:false });
 
-    document.getElementById('back').onclick = () => send({ type:'back' });
-    document.getElementById('reload').onclick = () => send({ type:'reload' });
-    document.getElementById('done').onclick = () => { send({ type:'complete' }); statusEl.textContent = 'Marked done'; };
-    document.getElementById('keyboard').onclick = () => kbdWrap.classList.toggle('show');
-    document.getElementById('sendText').onclick = () => { if (input.value) send({ type:'text', text: input.value }); input.value=''; };
-    document.getElementById('enterKey').onclick = () => send({ type:'key', key:'Enter' });
+    // Button handlers
+    addButtonHandler('back', () => send({ type:'back' }));
+    addButtonHandler('reload', () => send({ type:'reload' }));
+    addButtonHandler('done', () => { send({ type:'complete' }); statusEl.textContent = 'Marked done'; });
+    addButtonHandler('keyboard', () => kbdWrap.classList.toggle('show'));
+    addButtonHandler('sendText', () => { 
+      if (input.value) send({ type:'text', text: input.value }); 
+      input.value=''; 
+    });
+    addButtonHandler('enterKey', () => send({ type:'key', key:'Enter' }));
+    
+    // Keyboard input handling
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && input.value) {
+        send({ type:'text', text: input.value });
+        input.value = '';
+      }
+    });
   </script>
 </body>
 </html>
