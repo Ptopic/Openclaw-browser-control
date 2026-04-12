@@ -125,15 +125,18 @@ export async function attachToPage(cdpHttpUrl, preferredUrl) {
   const res = await fetch(newUrl, { method: 'PUT' });
   
   if (!res.ok) {
+    const errorText = await res.text().catch(() => 'unknown');
+    console.error(`[CDP] Failed to create new page: HTTP ${res.status} - ${errorText}`);
     throw new Error(`Failed to create new page: HTTP ${res.status}`);
   }
   
   const target = await res.json();
-  console.log(`[CDP] Created new page: ${target.id}`);
+  console.log(`[CDP] Created new page: ${target.id} - ${target.url}`);
   
-  console.log(`[CDP] Attaching to target ${target.id}...`);
+  console.log(`[CDP] Connecting to browser WebSocket: ${browserWsUrl}`);
   const connection = await new CDPConnection(browserWsUrl).connect();
-  console.log(`[CDP] Connected to browser, sending Target.attachToTarget...`);
+  console.log(`[CDP] Connected to browser, sending Target.attachToTarget for ${target.id}...`);
+  
   try {
     const result = await connection.send('Target.attachToTarget', {
       targetId: target.id,
@@ -142,7 +145,8 @@ export async function attachToPage(cdpHttpUrl, preferredUrl) {
     console.log(`[CDP] Attached to target, sessionId: ${result.sessionId}`);
     return { connection, sessionId: result.sessionId, target, cdpHttpUrl, browserWsUrl };
   } catch (error) {
-    console.error(`[CDP] Failed to attach to target: ${error.message}`);
+    console.error(`[CDP] Failed to attach to target ${target.id}: ${error.message}`);
+    connection.close();
     throw error;
   }
 }
@@ -151,8 +155,12 @@ export async function attachToPageAny(candidates, preferredUrl) {
   const errors = [];
   for (const candidate of candidates) {
     try {
-      return await attachToPage(candidate, preferredUrl);
+      console.log(`[CDP] Trying candidate: ${candidate}`);
+      const result = await attachToPage(candidate, preferredUrl);
+      console.log(`[CDP] Successfully attached using: ${candidate}`);
+      return result;
     } catch (error) {
+      console.error(`[CDP] Candidate ${candidate} failed: ${error.message}`);
       errors.push({ candidate, error: error.message || String(error) });
     }
   }

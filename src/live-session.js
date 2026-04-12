@@ -52,6 +52,9 @@ export class LiveSession {
     ].filter(Boolean);
     const uniqueCandidates = [...new Set(candidates)];
     
+    console.log(`[LiveSession] Starting session for ${this.pageUrl} (device: ${this.device})`);
+    console.log(`[LiveSession] CDP candidates: ${uniqueCandidates.join(', ')}`);
+    
     // Retry logic - browser CDP may not be immediately available
     let lastError;
     for (let attempt = 0; attempt < 30; attempt++) {
@@ -61,16 +64,21 @@ export class LiveSession {
         this.sessionId = sessionId;
         this.target = target;
         this.cdpHttpUrl = cdpHttpUrl;
+        console.log(`[LiveSession] Successfully attached to page on attempt ${attempt + 1}`);
         break;
       } catch (err) {
         lastError = err;
+        console.error(`[LiveSession] Attempt ${attempt + 1}/30 failed: ${err.message}`);
         if (attempt < 29) {
-          console.log(`CDP connection attempt ${attempt + 1}/30 failed, retrying in 2s...`);
+          console.log(`[LiveSession] Retrying in 2s...`);
           await new Promise(r => setTimeout(r, 2000));
         }
       }
     }
-    if (!this.connection) throw lastError;
+    if (!this.connection) {
+      console.error(`[LiveSession] All attempts failed, throwing error`);
+      throw lastError;
+    }
 
     this.connection.on('Page.screencastFrame', async (params, evtSessionId) => {
       if (evtSessionId !== this.sessionId) return;
