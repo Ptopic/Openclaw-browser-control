@@ -34,6 +34,7 @@ app.get('/debug/config', (_req, res) => {
   res.json({
     cdpHttpUrl: config.cdpHttpUrl,
     cdpHttpUrlCandidates: config.cdpHttpUrlCandidates,
+    publicBaseUrl: config.publicBaseUrl,
   });
 });
 
