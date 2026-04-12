@@ -1,0 +1,12 @@
+services:
+  handoff:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${PORT:-80}:80"
+      - "9222:9222"
+    environment:
+      - SESSION_SECRET=${SESSION_SECRET:-change-me}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost}
