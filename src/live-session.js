@@ -105,13 +105,13 @@ export class LiveSession {
     }, this.sessionId);
   }
 
-  async dispatchScroll(deltaY, x, y) {
+  async dispatchScroll(deltaY, x, y, deltaX = 0) {
     await this.connection.send('Input.dispatchMouseEvent', {
       type: 'mouseWheel',
       x,
       y,
       deltaY,
-      deltaX: 0,
+      deltaX,
       modifiers: 0,
       pointerType: 'mouse',
     }, this.sessionId);

@@ -123,7 +123,7 @@ wss.on('connection', (ws) => {
     try {
       const msg = JSON.parse(buf.toString());
       if (msg.type === 'tap') await live.dispatchTap(msg.x, msg.y);
-      else if (msg.type === 'scroll') await live.dispatchScroll(msg.deltaY, msg.x, msg.y);
+      else if (msg.type === 'scroll') await live.dispatchScroll(msg.deltaY, msg.x, msg.y, msg.deltaX || 0);
       else if (msg.type === 'text') await live.insertText(msg.text || '');
       else if (msg.type === 'key') await live.key(msg.key);
       else if (msg.type === 'back') await live.navigateBack();

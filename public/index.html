@@ -75,15 +75,32 @@
     ws.onclose = () => { statusEl.textContent = 'Disconnected'; };
 
     let lastTap = null;
+    let lastTouch = null;
     canvas.addEventListener('touchstart', (e) => {
       e.preventDefault();
       const t = e.touches[0]; if (!t) return;
       lastTap = mapPoint(t.clientX, t.clientY);
+      lastTouch = { ...lastTap, time: Date.now() };
+    }, { passive:false });
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      const t = e.touches[0]; if (!t || !lastTouch) return;
+      const p = mapPoint(t.clientX, t.clientY);
+      const deltaY = lastTouch.y - p.y;
+      const deltaX = lastTouch.x - p.x;
+      // Only send scroll if moved significantly
+      if (Math.abs(deltaY) > 5 || Math.abs(deltaX) > 5) {
+        send({ type:'scroll', deltaY: deltaY * 2, deltaX: deltaX * 2, x: p.x, y: p.y });
+        lastTouch = { ...p, time: Date.now() };
+        lastTap = null; // Cancel tap on scroll
+      }
     }, { passive:false });
     canvas.addEventListener('touchend', (e) => {
       e.preventDefault();
+      // Only send tap if we didn't scroll (lastTap still set)
       if (lastTap) send({ type:'tap', ...lastTap });
       lastTap = null;
+      lastTouch = null;
     }, { passive:false });
 
     canvas.addEventListener('wheel', (e) => {
