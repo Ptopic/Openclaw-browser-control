@@ -88,13 +88,25 @@ export class LiveSession {
       await this.connection.send('Page.screencastFrameAck', { sessionId: params.sessionId }, this.sessionId).catch(() => {});
     });
 
-    await this.connection.send('Page.enable', {}, this.sessionId);
-    await this.connection.send('Runtime.enable', {}, this.sessionId);
-    await this.connection.send('DOM.enable', {}, this.sessionId);
-    await this.connection.send('Accessibility.enable', {}, this.sessionId);
-    const viewport = this.getViewportSettings();
-    await this.connection.send('Emulation.setDeviceMetricsOverride', viewport, this.sessionId);
-    await this.connection.send('Page.navigate', { url: this.pageUrl }, this.sessionId).catch(() => {});
+    console.log(`[LiveSession ${this.device}] Enabling CDP domains...`);
+    try {
+      await this.connection.send('Page.enable', {}, this.sessionId);
+      console.log(`[LiveSession ${this.device}] Page.enable OK`);
+      await this.connection.send('Runtime.enable', {}, this.sessionId);
+      console.log(`[LiveSession ${this.device}] Runtime.enable OK`);
+      await this.connection.send('DOM.enable', {}, this.sessionId);
+      console.log(`[LiveSession ${this.device}] DOM.enable OK`);
+      await this.connection.send('Accessibility.enable', {}, this.sessionId);
+      console.log(`[LiveSession ${this.device}] Accessibility.enable OK`);
+      const viewport = this.getViewportSettings();
+      await this.connection.send('Emulation.setDeviceMetricsOverride', viewport, this.sessionId);
+      console.log(`[LiveSession ${this.device}] Emulation.setDeviceMetricsOverride OK`);
+      await this.connection.send('Page.navigate', { url: this.pageUrl }, this.sessionId).catch(() => {});
+      console.log(`[LiveSession ${this.device}] Page.navigate OK`);
+    } catch (err) {
+      console.error(`[LiveSession ${this.device}] CDP command failed: ${err.message}`);
+      throw err;
+    }
     
     // Use device-specific screencast settings
     const screencastSettings = this.device === 'desktop' ? {
