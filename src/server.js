@@ -62,7 +62,8 @@ app.get('/debug/cdp', async (_req, res) => {
 app.post('/sessions', async (req, res) => {
   try {
     const pageUrl = req.body?.url || 'https://example.com';
-    const device = req.body?.device === 'desktop' ? 'desktop' : 'mobile';
+    // Use defaultDevice from config if set, otherwise use request parameter
+    const device = config.defaultDevice || (req.body?.device === 'desktop' ? 'desktop' : 'mobile');
     const live = new LiveSession({ pageUrl, device });
     await live.start();
     const session = store.create({ pageUrl, device });

@@ -10,6 +10,8 @@ export const config = {
   cdpHttpUrlCandidates: (process.env.CDP_HTTP_URL_CANDIDATES || '').split(',').map((x) => x.trim()).filter(Boolean),
   sessionSecret: process.env.SESSION_SECRET || 'change-me',
   publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:8787',
+  // Default device type (if set, overrides the device parameter in requests)
+  defaultDevice: process.env.DEFAULT_DEVICE || null, // 'mobile' or 'desktop' or null
   // Mobile viewport
   mobileWidth: Number(process.env.MOBILE_WIDTH || 390),
   mobileHeight: Number(process.env.MOBILE_HEIGHT || 844),
