@@ -35,6 +35,12 @@ app.get('/debug/config', (_req, res) => {
     cdpHttpUrl: config.cdpHttpUrl,
     cdpHttpUrlCandidates: config.cdpHttpUrlCandidates,
     publicBaseUrl: config.publicBaseUrl,
+    screencast: {
+      format: config.screencastFormat,
+      quality: config.screencastQuality,
+      maxWidth: config.screencastMaxWidth,
+      maxHeight: config.screencastMaxHeight,
+    },
   });
 });
 
