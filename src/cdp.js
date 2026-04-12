@@ -118,7 +118,19 @@ export class CDPConnection {
 
 export async function attachToPage(cdpHttpUrl, preferredUrl) {
   const browserWsUrl = await getBrowserWebSocketDebuggerUrl(cdpHttpUrl);
-  const target = await getOrCreatePageTarget(cdpHttpUrl, preferredUrl);
+  
+  // Always create a NEW page for each session to avoid conflicts
+  const newUrl = `${cdpHttpUrl.replace(/\/$/, '')}/json/new?${encodeURIComponent(preferredUrl || 'https://example.com')}`;
+  console.log(`[CDP] Creating new page: ${newUrl}`);
+  const res = await fetch(newUrl, { method: 'PUT' });
+  
+  if (!res.ok) {
+    throw new Error(`Failed to create new page: HTTP ${res.status}`);
+  }
+  
+  const target = await res.json();
+  console.log(`[CDP] Created new page: ${target.id}`);
+  
   console.log(`[CDP] Attaching to target ${target.id}...`);
   const connection = await new CDPConnection(browserWsUrl).connect();
   console.log(`[CDP] Connected to browser, sending Target.attachToTarget...`);
