@@ -14,9 +14,9 @@ export const config = {
   mobileHeight: Number(process.env.MOBILE_HEIGHT || 844),
   deviceScaleFactor: Number(process.env.DEVICE_SCALE_FACTOR || 2),
   screencastFormat: process.env.SCREENCAST_FORMAT || 'jpeg',
-  screencastQuality: Number(process.env.SCREENCAST_QUALITY || 30),
-  screencastMaxWidth: Number(process.env.SCREENCAST_MAX_WIDTH || 720),
-  screencastMaxHeight: Number(process.env.SCREENCAST_MAX_HEIGHT || 1560),
+  screencastQuality: Number(process.env.SCREENCAST_QUALITY || 85),
+  screencastMaxWidth: Number(process.env.SCREENCAST_MAX_WIDTH || 1080),
+  screencastMaxHeight: Number(process.env.SCREENCAST_MAX_HEIGHT || 2340),
   screencastEveryNthFrame: Number(process.env.SCREENCAST_EVERY_NTH_FRAME || 1),
   sessionTtlSeconds: Number(process.env.SESSION_TTL_SECONDS || 1800),
 };
