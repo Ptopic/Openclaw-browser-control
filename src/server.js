@@ -61,13 +61,10 @@ app.post('/sessions', async (req, res) => {
     const session = store.create({ pageUrl });
     liveSessions.set(session.id, live);
     const token = store.sign(session);
-    // Use forwarded headers from Traefik/proxy
-    const proto = req.get('x-forwarded-proto') || req.protocol;
+    // Always use forwarded headers from Traefik/proxy
+    const proto = req.get('x-forwarded-proto') || 'https';
     const host = req.get('x-forwarded-host') || req.get('host');
-    const baseUrl = (config.publicBaseUrl && !config.publicBaseUrl.includes('localhost'))
-      ? config.publicBaseUrl.replace(/\/$/, '')
-      : `${proto}://${host}`;
-    const handoffUrl = `${baseUrl}/session/${token}`;
+    const handoffUrl = `${proto}://${host}/session/${token}`;
     res.json({ sessionId: session.id, handoffUrl, expiresAt: session.expiresAt, pageUrl });
   } catch (error) {
     res.status(500).json({ error: error.message || String(error) });
