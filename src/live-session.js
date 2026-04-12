@@ -258,13 +258,19 @@ export class LiveSession {
   }
 
   async click(selector) {
-    // Find element and click it
-    const { objectId } = await this.connection.send('DOM.querySelector', {
+    // Get document node
+    const { root } = await this.connection.send('DOM.getDocument', {}, this.sessionId);
+    
+    // Find element by selector
+    const { nodeId } = await this.connection.send('DOM.querySelector', {
+      nodeId: root.nodeId,
       selector,
-    }, this.sessionId).then(r => r.node ? this.connection.send('DOM.resolveNode', { nodeId: r.node.nodeId }, this.sessionId) : Promise.reject(new Error('Element not found')));
+    }, this.sessionId);
+    
+    if (!nodeId) throw new Error(`Element not found: ${selector}`);
     
     // Get box model for coordinates
-    const { model } = await this.connection.send('DOM.getBoxModel', { objectId }, this.sessionId);
+    const { model } = await this.connection.send('DOM.getBoxModel', { nodeId }, this.sessionId);
     const x = (model.content[0] + model.content[2]) / 2;
     const y = (model.content[1] + model.content[5]) / 2;
     
@@ -272,8 +278,25 @@ export class LiveSession {
   }
 
   async fill(selector, value) {
+    // Get document node
+    const { root } = await this.connection.send('DOM.getDocument', {}, this.sessionId);
+    
+    // Find element by selector
+    const { nodeId } = await this.connection.send('DOM.querySelector', {
+      nodeId: root.nodeId,
+      selector,
+    }, this.sessionId);
+    
+    if (!nodeId) throw new Error(`Element not found: ${selector}`);
+    
+    // Get box model for coordinates
+    const { model } = await this.connection.send('DOM.getBoxModel', { nodeId }, this.sessionId);
+    const x = (model.content[0] + model.content[2]) / 2;
+    const y = (model.content[1] + model.content[5]) / 2;
+    
     // Click to focus
-    await this.click(selector);
+    await this.dispatchTap(x, y);
+    
     // Select all and type
     await this.connection.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2 }, this.sessionId);
     await this.connection.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2 }, this.sessionId);
