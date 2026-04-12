@@ -20,6 +20,16 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/debug/headers', (req, res) => {
+  res.json({
+    host: req.get('host'),
+    xForwardedHost: req.get('x-forwarded-host'),
+    xForwardedProto: req.get('x-forwarded-proto'),
+    protocol: req.protocol,
+    allHeaders: req.headers
+  });
+});
+
 app.get('/debug/config', (_req, res) => {
   res.json({
     cdpHttpUrl: config.cdpHttpUrl,
