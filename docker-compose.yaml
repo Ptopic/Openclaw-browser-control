@@ -4,9 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "8788:80"
-      - "9223:9222"
+    expose:
+      - "80"
     environment:
       - SESSION_SECRET=${SESSION_SECRET:-change-me}
-      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:8080}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:80}
