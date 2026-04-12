@@ -119,12 +119,20 @@ export class CDPConnection {
 export async function attachToPage(cdpHttpUrl, preferredUrl) {
   const browserWsUrl = await getBrowserWebSocketDebuggerUrl(cdpHttpUrl);
   const target = await getOrCreatePageTarget(cdpHttpUrl, preferredUrl);
+  console.log(`[CDP] Attaching to target ${target.id}...`);
   const connection = await new CDPConnection(browserWsUrl).connect();
-  const { sessionId } = await connection.send('Target.attachToTarget', {
-    targetId: target.id,
-    flatten: true,
-  });
-  return { connection, sessionId, target, cdpHttpUrl, browserWsUrl };
+  console.log(`[CDP] Connected to browser, sending Target.attachToTarget...`);
+  try {
+    const result = await connection.send('Target.attachToTarget', {
+      targetId: target.id,
+      flatten: true,
+    });
+    console.log(`[CDP] Attached to target, sessionId: ${result.sessionId}`);
+    return { connection, sessionId: result.sessionId, target, cdpHttpUrl, browserWsUrl };
+  } catch (error) {
+    console.error(`[CDP] Failed to attach to target: ${error.message}`);
+    throw error;
+  }
 }
 
 export async function attachToPageAny(candidates, preferredUrl) {
