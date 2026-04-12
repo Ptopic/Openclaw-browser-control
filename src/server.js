@@ -62,15 +62,24 @@ app.get('/debug/cdp', async (_req, res) => {
 app.post('/sessions', async (req, res) => {
   try {
     const pageUrl = req.body?.url || 'https://example.com';
-    // Use defaultDevice from config if set, otherwise use request parameter
-    const device = config.defaultDevice || (req.body?.device === 'desktop' ? 'desktop' : 'mobile');
+    // Determine device type from (1) DEFAULT_DEVICE env, (2) domain name, (3) request parameter
+    const host = req.get('x-forwarded-host') || req.get('host') || '';
+    let device;
+    if (config.defaultDevice) {
+      device = config.defaultDevice;
+    } else if (host.includes('mobile-handoff')) {
+      device = 'mobile';
+    } else if (host.includes('desktop-handoff')) {
+      device = 'desktop';
+    } else {
+      device = req.body?.device === 'desktop' ? 'desktop' : 'mobile';
+    }
     const live = new LiveSession({ pageUrl, device });
     await live.start();
     const session = store.create({ pageUrl, device });
     liveSessions.set(session.id, live);
     // Always use forwarded headers from Traefik/proxy
     const proto = req.get('x-forwarded-proto') || 'https';
-    const host = req.get('x-forwarded-host') || req.get('host');
     const handoffUrl = `${proto}://${host}/session/${session.id}`;
     res.json({ sessionId: session.id, handoffUrl, expiresAt: session.expiresAt, pageUrl, device });
   } catch (error) {
