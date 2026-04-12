@@ -40,12 +40,21 @@ export async function listTargets(cdpHttpUrl) {
 
 export async function getOrCreatePageTarget(cdpHttpUrl, preferredUrl) {
   const newUrl = `${cdpHttpUrl.replace(/\/$/, '')}/json/new?${encodeURIComponent(preferredUrl || 'https://example.com')}`;
+  console.log(`[CDP] Attempting to create new page: ${newUrl}`);
   const res = await fetch(newUrl, { method: 'PUT' });
-  if (res.ok) return res.json();
+  if (res.ok) {
+    const target = await res.json();
+    console.log(`[CDP] Created new page: ${target.id}`);
+    return target;
+  }
+  console.log(`[CDP] Failed to create new page: HTTP ${res.status}, falling back to existing page`);
 
   const targets = await listTargets(cdpHttpUrl);
   const pageTarget = targets.find((t) => t.type === 'page' && !t.parentId);
-  if (pageTarget) return pageTarget;
+  if (pageTarget) {
+    console.log(`[CDP] Using existing page: ${pageTarget.id}`);
+    return pageTarget;
+  }
 
   throw new Error(`Failed creating target: HTTP ${res.status}`);
 }

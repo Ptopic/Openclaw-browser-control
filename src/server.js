@@ -83,6 +83,7 @@ app.post('/sessions', async (req, res) => {
     const handoffUrl = `${proto}://${host}/session/${session.id}`;
     res.json({ sessionId: session.id, handoffUrl, expiresAt: session.expiresAt, pageUrl, device });
   } catch (error) {
+    console.error('Failed to create session:', error);
     res.status(500).json({ error: error.message || String(error) });
   }
 });
