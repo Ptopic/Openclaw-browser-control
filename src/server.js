@@ -99,6 +99,82 @@ app.get('/session/:token', (req, res) => {
   }
 });
 
+// Automation endpoint for agent control
+app.post('/session/:token/automation', async (req, res) => {
+  try {
+    const session = store.verify(req.params.token);
+    const live = liveSessions.get(session.id);
+    if (!live) {
+      return res.status(404).json({ error: 'Live session not found' });
+    }
+    
+    const { action, ...params } = req.body;
+    
+    switch (action) {
+      case 'navigate':
+        await live.navigate(params.url);
+        res.json({ ok: true, url: params.url });
+        break;
+      case 'tap':
+        await live.dispatchTap(params.x, params.y);
+        res.json({ ok: true });
+        break;
+      case 'click':
+        await live.click(params.selector);
+        res.json({ ok: true });
+        break;
+      case 'fill':
+        await live.fill(params.selector, params.value);
+        res.json({ ok: true });
+        break;
+      case 'scroll':
+        await live.dispatchScroll(params.deltaY || 0, params.x, params.y, params.deltaX || 0);
+        res.json({ ok: true });
+        break;
+      case 'type':
+        await live.insertText(params.text);
+        res.json({ ok: true });
+        break;
+      case 'key':
+        await live.key(params.key);
+        res.json({ ok: true });
+        break;
+      case 'back':
+        await live.navigateBack();
+        res.json({ ok: true });
+        break;
+      case 'reload':
+        await live.reload();
+        res.json({ ok: true });
+        break;
+      case 'getUrl':
+        const url = await live.getUrl();
+        res.json({ url });
+        break;
+      case 'getTitle':
+        const title = await live.getTitle();
+        res.json({ title });
+        break;
+      case 'evaluate':
+        const result = await live.evaluate(params.expression);
+        res.json({ result });
+        break;
+      case 'snapshot':
+        const snapshot = await live.snapshot();
+        res.json({ snapshot });
+        break;
+      case 'waitForLoad':
+        await live.waitForLoad(params.timeout || 10000);
+        res.json({ ok: true });
+        break;
+      default:
+        res.status(400).json({ error: `Unknown action: ${action}` });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (!url.pathname.startsWith('/ws/')) return socket.destroy();

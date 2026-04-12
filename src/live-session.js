@@ -82,6 +82,8 @@ export class LiveSession {
 
     await this.connection.send('Page.enable', {}, this.sessionId);
     await this.connection.send('Runtime.enable', {}, this.sessionId);
+    await this.connection.send('DOM.enable', {}, this.sessionId);
+    await this.connection.send('Accessibility.enable', {}, this.sessionId);
     const viewport = this.getViewportSettings();
     await this.connection.send('Emulation.setDeviceMetricsOverride', viewport, this.sessionId);
     await this.connection.send('Page.navigate', { url: this.pageUrl }, this.sessionId).catch(() => {});
@@ -187,6 +189,95 @@ export class LiveSession {
 
   async reload() {
     await this.connection.send('Page.reload', { ignoreCache: true }, this.sessionId).catch(() => {});
+  }
+
+  // Automation methods for agent control
+  async navigate(url) {
+    await this.connection.send('Page.navigate', { url }, this.sessionId);
+    await this.waitForLoad();
+  }
+
+  async waitForLoad(timeout = 10000) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('waitForLoad timeout')), timeout);
+      const handler = (params, sid) => {
+        if (sid !== this.sessionId) return;
+        if (params.name === 'load') {
+          clearTimeout(timer);
+          this.connection.off('Page.loadEventFired', handler);
+          resolve();
+        }
+      };
+      this.connection.on('Page.loadEventFired', handler);
+    });
+  }
+
+  async evaluate(expression) {
+    const { result } = await this.connection.send('Runtime.evaluate', {
+      expression,
+      returnByValue: true,
+    }, this.sessionId);
+    return result.value;
+  }
+
+  async getUrl() {
+    return this.evaluate('window.location.href');
+  }
+
+  async getTitle() {
+    return this.evaluate('document.title');
+  }
+
+  async snapshot() {
+    // Get accessibility tree like agent-browser
+    const { root } = await this.connection.send('Accessibility.getFullAXTree', {}, this.sessionId);
+    return this._parseAccessibilityTree(root);
+  }
+
+  _parseAccessibilityTree(node, depth = 0) {
+    const result = [];
+    const indent = '  '.repeat(depth);
+    const role = node.role?.value || 'unknown';
+    const name = node.name?.value || '';
+    const value = node.value?.value || '';
+    
+    if (name || role) {
+      let line = `${indent}- ${role}`;
+      if (name) line += ` "${name}"`;
+      if (value && value !== name) line += ` [value: "${value}"]`;
+      if (node.nodeId) line += ` [nodeId: ${node.nodeId}]`;
+      result.push(line);
+    }
+    
+    if (node.children) {
+      for (const child of node.children) {
+        result.push(...this._parseAccessibilityTree(child, depth + 1));
+      }
+    }
+    return result.join('\n');
+  }
+
+  async click(selector) {
+    // Find element and click it
+    const { objectId } = await this.connection.send('DOM.querySelector', {
+      selector,
+    }, this.sessionId).then(r => r.node ? this.connection.send('DOM.resolveNode', { nodeId: r.node.nodeId }, this.sessionId) : Promise.reject(new Error('Element not found')));
+    
+    // Get box model for coordinates
+    const { model } = await this.connection.send('DOM.getBoxModel', { objectId }, this.sessionId);
+    const x = (model.content[0] + model.content[2]) / 2;
+    const y = (model.content[1] + model.content[5]) / 2;
+    
+    await this.dispatchTap(x, y);
+  }
+
+  async fill(selector, value) {
+    // Click to focus
+    await this.click(selector);
+    // Select all and type
+    await this.connection.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2 }, this.sessionId);
+    await this.connection.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2 }, this.sessionId);
+    await this.insertText(value);
   }
 
   async stop() {
