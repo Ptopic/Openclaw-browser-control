@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import jwt from 'jsonwebtoken';
 
 export class SessionStore {
   constructor(secret, ttlSeconds) {
@@ -22,16 +21,11 @@ export class SessionStore {
     return session;
   }
 
-  sign(session) {
-    return jwt.sign({ sid: session.id }, this.secret, { expiresIn: this.ttlSeconds });
-  }
-
-  verify(token) {
-    const decoded = jwt.verify(token, this.secret);
-    const session = this.sessions.get(decoded.sid);
+  get(id) {
+    const session = this.sessions.get(id);
     if (!session) throw new Error('Session not found');
     if (session.expiresAt < Date.now()) {
-      this.sessions.delete(decoded.sid);
+      this.sessions.delete(id);
       throw new Error('Session expired');
     }
     return session;

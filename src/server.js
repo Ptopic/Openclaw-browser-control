@@ -67,42 +67,41 @@ app.post('/sessions', async (req, res) => {
     await live.start();
     const session = store.create({ pageUrl, device });
     liveSessions.set(session.id, live);
-    const token = store.sign(session);
     // Always use forwarded headers from Traefik/proxy
     const proto = req.get('x-forwarded-proto') || 'https';
     const host = req.get('x-forwarded-host') || req.get('host');
-    const handoffUrl = `${proto}://${host}/session/${token}`;
+    const handoffUrl = `${proto}://${host}/session/${session.id}`;
     res.json({ sessionId: session.id, handoffUrl, expiresAt: session.expiresAt, pageUrl, device });
   } catch (error) {
     res.status(500).json({ error: error.message || String(error) });
   }
 });
 
-app.post('/session/:token/complete', (req, res) => {
+app.post('/session/:sessionId/complete', (req, res) => {
   try {
-    const session = store.verify(req.params.token);
+    const session = store.get(req.params.sessionId);
     store.complete(session.id);
     const live = liveSessions.get(session.id);
     live?.broadcast({ type: 'status', status: 'completed' });
     res.json({ ok: true, sessionId: session.id });
   } catch (error) {
-    res.status(401).json({ error: error.message || String(error) });
+    res.status(404).json({ error: error.message || String(error) });
   }
 });
 
-app.get('/session/:token', (req, res) => {
+app.get('/session/:sessionId', (req, res) => {
   try {
-    store.verify(req.params.token);
+    store.get(req.params.sessionId);
     res.sendFile(path.resolve(process.cwd(), 'public/index.html'));
   } catch (error) {
-    res.status(401).send(`Invalid session: ${error.message || String(error)}`);
+    res.status(404).send(`Session not found: ${error.message || String(error)}`);
   }
 });
 
 // Automation endpoint for agent control
-app.post('/session/:token/automation', async (req, res) => {
+app.post('/session/:sessionId/automation', async (req, res) => {
   try {
-    const session = store.verify(req.params.token);
+    const session = store.get(req.params.sessionId);
     const live = liveSessions.get(session.id);
     if (!live) {
       return res.status(404).json({ error: 'Live session not found' });
@@ -178,10 +177,10 @@ app.post('/session/:token/automation', async (req, res) => {
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (!url.pathname.startsWith('/ws/')) return socket.destroy();
-  const token = url.pathname.split('/').pop();
+  const sessionId = url.pathname.split('/').pop();
   let session;
   try {
-    session = store.verify(token);
+    session = store.get(sessionId);
   } catch {
     return socket.destroy();
   }
