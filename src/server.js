@@ -122,15 +122,35 @@ app.post('/session/:sessionId/automation', async (req, res) => {
     
     switch (action) {
       case 'navigate':
-        await live.navigate(params.url);
-        res.json({ ok: true, url: params.url });
+        try {
+          await live.navigate(params.url);
+          res.json({ ok: true, url: params.url });
+        } catch (e) {
+          // waitForLoad timeout is common on SPAs — navigation still succeeds
+          if (e.message && e.message.includes('waitForLoad')) {
+            console.log(`[Automation] navigate waitForLoad timeout (expected on SPAs): ${params.url}`);
+            res.json({ ok: true, url: params.url, warning: e.message });
+          } else {
+            throw e;
+          }
+        }
         break;
       case 'tap':
         await live.dispatchTap(params.x, params.y);
         res.json({ ok: true });
         break;
       case 'click':
-        await live.click(params.selector);
+        try {
+          await live.click(params.selector);
+        } catch (e) {
+          // CDP dispatchTap fails on JS frameworks — fall back to JS .click()
+          console.log(`[Automation] CDP click failed for "${params.selector}": ${e.message}, trying JS click`);
+          try {
+            await live.evaluate(`document.querySelector("${params.selector}")?.click()`);
+          } catch (e2) {
+            throw new Error(`Click failed: CDP (${e.message}) and JS (${e2.message})`);
+          }
+        }
         res.json({ ok: true });
         break;
       case 'fill':
