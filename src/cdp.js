@@ -121,9 +121,7 @@ export class CDPConnection {
 }
 
 export async function attachToPage(cdpHttpUrl, preferredUrl) {
-  const browserWsUrl = await getBrowserWebSocketDebuggerUrl(cdpHttpUrl);
-  
-  // Always create a NEW page for each session to avoid conflicts
+  // Create a new page target
   const newUrl = `${cdpHttpUrl.replace(/\/$/, '')}/json/new?${encodeURIComponent(preferredUrl || 'https://example.com')}`;
   console.log(`[CDP] Creating new page: ${newUrl}`);
   const res = await fetch(newUrl, { method: 'PUT' });
@@ -137,22 +135,17 @@ export async function attachToPage(cdpHttpUrl, preferredUrl) {
   const target = await res.json();
   console.log(`[CDP] Created new page: ${target.id} - ${target.url}`);
   
-  console.log(`[CDP] Connecting to browser WebSocket: ${browserWsUrl}`);
-  const connection = await new CDPConnection(browserWsUrl).connect();
-  console.log(`[CDP] Connected to browser, sending Target.attachToTarget for ${target.id}...`);
-  
-  try {
-    const result = await connection.send('Target.attachToTarget', {
-      targetId: target.id,
-      flatten: true,
-    });
-    console.log(`[CDP] Attached to target, sessionId: ${result.sessionId}`);
-    return { connection, sessionId: result.sessionId, target, cdpHttpUrl, browserWsUrl };
-  } catch (error) {
-    console.error(`[CDP] Failed to attach to target ${target.id}: ${error.message}`);
-    connection.close();
-    throw error;
+  // Connect directly to the page's WebSocket URL — avoids Target.attachToTarget detachment issues
+  const pageWsUrl = target.webSocketDebuggerUrl;
+  if (!pageWsUrl) {
+    throw new Error(`No webSocketDebuggerUrl for target ${target.id}`);
   }
+  console.log(`[CDP] Connecting to page WebSocket: ${pageWsUrl}`);
+  
+  const connection = await new CDPConnection(pageWsUrl).connect();
+  console.log(`[CDP] Connected to page directly, no Target.attachToTarget needed`);
+  
+  return { connection, sessionId: undefined, target, cdpHttpUrl, browserWsUrl: pageWsUrl };
 }
 
 export async function attachToPageAny(candidates, preferredUrl) {

@@ -38,17 +38,6 @@ export class LiveSession {
     const candidates = [
       config.cdpHttpUrl,
       ...config.cdpHttpUrlCandidates,
-      'http://browser:9223',
-      'http://q48c48csscs848kggkgs0sgg:9222',
-      'http://remote-shopping-browser:9222',
-      'http://shared-shopping-browser:9222',
-      'http://q48c48csscs848kggkgs0sgg-013553337612:9222',
-      'http://host.docker.internal:39222',
-      'http://172.17.0.1:39222',
-      'http://172.18.0.1:39222',
-      'http://172.19.0.1:39222',
-      'http://46.225.128.142:49222',
-      'http://46.225.128.142:39222',
     ].filter(Boolean);
     const uniqueCandidates = [...new Set(candidates)];
     
@@ -81,7 +70,8 @@ export class LiveSession {
     }
 
     this.connection.on('Page.screencastFrame', async (params, evtSessionId) => {
-      if (evtSessionId !== this.sessionId) return;
+      // When connected directly to a page, sessionId is undefined — accept all events
+      if (this.sessionId !== undefined && evtSessionId !== this.sessionId) return;
       this.lastFrame = params.data;
       this.lastMetadata = params.metadata;
       this.broadcast({ type: 'frame', data: params.data, metadata: params.metadata });
@@ -123,8 +113,12 @@ export class LiveSession {
       everyNthFrame: config.screencastEveryNthFrame,
     };
     console.log(`[LiveSession ${this.device}] Starting screencast with settings:`, JSON.stringify(screencastSettings));
-    await this.connection.send('Page.startScreencast', screencastSettings, this.sessionId);
-    console.log(`[LiveSession ${this.device}] Page.startScreencast OK`);
+    try {
+      await this.connection.send('Page.startScreencast', screencastSettings, this.sessionId);
+      console.log(`[LiveSession ${this.device}] Page.startScreencast OK`);
+    } catch (err) {
+      console.error(`[LiveSession ${this.device}] Page.startScreencast FAILED: ${err.message}`);
+    }
   }
 
   addClient(ws) {
@@ -223,7 +217,7 @@ export class LiveSession {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('waitForLoad timeout')), timeout);
       const handler = (params, sid) => {
-        if (sid !== this.sessionId) return;
+        if (this.sessionId !== undefined && sid !== this.sessionId) return;
         if (params.name === 'load') {
           clearTimeout(timer);
           this.connection.off('Page.loadEventFired', handler);
