@@ -19,11 +19,11 @@ export const config = {
   // Desktop viewport (720p for better performance)
   desktopWidth: Number(process.env.DESKTOP_WIDTH || 1280),
   desktopHeight: Number(process.env.DESKTOP_HEIGHT || 720),
-  // Mobile screencast (high quality)
+  // Mobile screencast (balanced quality)
   screencastFormat: process.env.SCREENCAST_FORMAT || 'jpeg',
-  screencastQuality: Number(process.env.SCREENCAST_QUALITY || 85),
-  screencastMaxWidth: Number(process.env.SCREENCAST_MAX_WIDTH || 1440),
-  screencastMaxHeight: Number(process.env.SCREENCAST_MAX_HEIGHT || 3120),
+  screencastQuality: Number(process.env.SCREENCAST_QUALITY || 70),
+  screencastMaxWidth: Number(process.env.SCREENCAST_MAX_WIDTH || 820),
+  screencastMaxHeight: Number(process.env.SCREENCAST_MAX_HEIGHT || 1780),
   // Desktop screencast (lower quality for slow internet)
   desktopScreencastQuality: Number(process.env.DESKTOP_SCREENCAST_QUALITY || 70),
   desktopScreencastMaxWidth: Number(process.env.DESKTOP_SCREENCAST_MAX_WIDTH || 1280),

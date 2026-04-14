@@ -113,11 +113,20 @@ export class LiveSession {
       everyNthFrame: config.screencastEveryNthFrame,
     };
     console.log(`[LiveSession ${this.device}] Starting screencast with settings:`, JSON.stringify(screencastSettings));
-    try {
-      await this.connection.send('Page.startScreencast', screencastSettings, this.sessionId);
-      console.log(`[LiveSession ${this.device}] Page.startScreencast OK`);
-    } catch (err) {
-      console.error(`[LiveSession ${this.device}] Page.startScreencast FAILED: ${err.message}`);
+    let screencastOk = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await this.connection.send('Page.startScreencast', screencastSettings, this.sessionId);
+        console.log(`[LiveSession ${this.device}] Page.startScreencast OK (attempt ${attempt + 1})`);
+        screencastOk = true;
+        break;
+      } catch (err) {
+        console.error(`[LiveSession ${this.device}] Page.startScreencast FAILED (attempt ${attempt + 1}): ${err.message}`);
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+    if (!screencastOk) {
+      console.log(`[LiveSession ${this.device}] Continuing without screencast`);
     }
   }
 
