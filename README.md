@@ -1,121 +1,81 @@
-# Browser Handoff Service
+# OpenClaw Browser Handoff
 
-A self-hosted browser handoff service with automation API. Stream a headless browser to your phone/laptop and interact with it via touch/mouse, or control it programmatically.
+A self-hosted browser handoff service. Stream a headless Chromium to a web UI for human interaction, or control it programmatically via CDP.
 
-## Features
+## Purpose
 
-- **Human Handoff:** Stream browser to mobile/desktop web UI
-- **Automation API:** Control browser programmatically via REST API
-- **Hybrid Mode:** Agent sets up, human completes (payment, 2FA)
-- **Device Modes:** Mobile (390×844, touch) and Desktop (1280×720, mouse)
-- **Persistent Sessions:** Cart state maintained across interactions
+- **Human handoff:** Stream browser to mobile/desktop web UI for manual interaction
+- **Automation:** Use [agent-browser](https://github.com/vercel-labs/agent-browser) with `--cdp http://browser:9223` for programmatic control
+- **Parallel subagents:** Multiple subagents can share the same Chromium session via CDP for fast parallel automation
 
 ## Quick Start
 
 ```bash
-# Create a session
+# 1. Create a session (returns handoffUrl for human, sessionId for automation)
 curl -X POST "https://browser-handoff.petartopic.com/sessions" \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "device": "desktop"}'
+  -d '{"url": "https://example.com"}'
 
-# Open the handoffUrl on your device to interact with the browser
+# 2a. Human handoff: open handoffUrl in browser
+
+# 2b. Automation: connect agent-browser to CDP
+agent-browser --session my-task --cdp http://browser:9223 open "https://example.com"
+agent-browser --session my-task --cdp http://browser:9223 wait --load networkidle
+agent-browser --session my-task --cdp http://browser:9223 snapshot -i --json
 ```
 
-## Automation API
+## CDP Endpoint
+
+- **Internal URL:** `http://browser:9223` (from within Coolify container network)
+- **Automation:** All browser actions via `agent-browser --cdp http://browser:9223`
+- **No REST automation API** — all actions go through agent-browser
+
+## Sessions API
 
 ```bash
-# Get current URL
-curl -X POST "https://browser-handoff.petartopic.com/session/$TOKEN/automation" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"getUrl"}'
-
-# Fill a form
-curl -X POST "https://browser-handoff.petartopic.com/session/$TOKEN/automation" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"fill","selector":"input[name=email]","value":"user@example.com"}'
-
-# Click a button
-curl -X POST "https://browser-handoff.petartopic.com/session/$TOKEN/automation" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"click","selector":"button.submit"}'
-
-# Run JavaScript
-curl -X POST "https://browser-handoff.petartopic.com/session/$TOKEN/automation" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"evaluate","expression":"document.querySelector(\".price\").innerText"}'
+POST /sessions
+Body: {"url": "https://...", "device": "desktop|mobile"}
+Response: {"sessionId": "...", "handoffUrl": "...", "expiresAt": ..., "pageUrl": "...", "device": "..."}
 ```
 
-## Available Actions
-
-| Action | Description |
-|--------|-------------|
-| `navigate` | Go to URL |
-| `tap` | Tap/click at coordinates |
-| `click` | Click element by selector |
-| `fill` | Fill input field |
-| `type` | Insert text |
-| `scroll` | Scroll page |
-| `key` | Press key (Enter, Tab, Escape, Backspace) |
-| `getUrl` | Get current URL |
-| `getTitle` | Get page title |
-| `evaluate` | Run JavaScript |
-| `snapshot` | Get accessibility tree |
-| `back` | Go back |
-| `reload` | Reload page |
-
-## Deployment
-
-This service is deployed on Coolify:
-
-- **App:** `live-browser-handoff-stack`
-- **UUID:** `scsgsw4wc8ow8c4g0w8so4s0`
-- **Domain:** `https://browser-handoff.petartopic.com`
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | 8787 | Server port |
-| `CDP_HTTP_URL` | `http://127.0.0.1:9222` | Chrome CDP endpoint |
-| `SESSION_SECRET` | `change-me` | JWT signing secret |
-| `MOBILE_WIDTH` | 390 | Mobile viewport width |
-| `MOBILE_HEIGHT` | 844 | Mobile viewport height |
-| `DESKTOP_WIDTH` | 1280 | Desktop viewport width |
-| `DESKTOP_HEIGHT` | 720 | Desktop viewport height |
-| `SCREENCAST_QUALITY` | 85 | JPEG quality (mobile) |
-| `DESKTOP_SCREENCAST_QUALITY` | 70 | JPEG quality (desktop) |
+```bash
+GET /session/:sessionId   # Serve handoff viewer HTML
+POST /session/:sessionId/complete   # Mark session done
+GET /health               # Health check
+```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│         Single Container            │
-│  ┌─────────────────────────────┐   │
-│  │      supervisord            │   │
-│  │  ┌────────┐  ┌───────────┐  │   │
-│  │  │Chrome  │  │  Handoff  │  │   │
-│  │  │:9222   │  │  :80      │  │   │
-│  │  │headless│  │  Node.js  │  │   │
-│  │  └────────┘  └───────────┘  │   │
-│  └─────────────────────────────┘   │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│           Single Container               │
+│  ┌──────────────────────────────────┐  │
+│  │         supervisord              │  │
+│  │  ┌─────────────┐ ┌────────────┐ │  │
+│  │  │  Chromium   │ │  Handoff   │ │  │
+│  │  │  :9222      │ │  :80       │ │  │
+│  │  │  (CDP)      │ │  (sessions)│ │  │
+│  │  └─────────────┘ └────────────┘ │  │
+│  └──────────────────────────────────┘  │
+└─────────────────────────────────────────┘
 ```
 
-- Chrome runs in headless mode with CDP on localhost:9222
-- Handoff service connects to CDP and streams frames via WebSocket
-- CDP is NOT exposed publicly - only accessible within the container
+- Chromium runs headless with CDP on `localhost:9222`
+- Handoff service creates sessions and serves the viewer HTML
+- CDP is NOT exposed publicly — only accessible as `http://browser:9222` within the container network
+
+## Deployment
+
+Deployed on Coolify:
+- **App:** `browser-handoff-desktop` (UUID: `lchptv878crb40xb8mjb41xu`)
+- **Repo:** `git@github.com:Ptopic/Openclaw-browser-control.git` (`single-container` branch)
+- **Domain:** `https://desktop-handoff.petartopic.com`
 
 ## Development
 
 ```bash
-# Install dependencies
 npm install
-
-# Run locally
 npm start
-
-# Run with custom env
-CDP_HTTP_URL=http://localhost:9222 npm start
 ```
 
 ## License

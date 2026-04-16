@@ -4,46 +4,21 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { config } from './config.js';
 import { SessionStore } from './session-store.js';
-import { LiveSession } from './live-session.js';
 import { probeCdpHttp, getBrowserWebSocketDebuggerUrl } from './cdp.js';
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 const store = new SessionStore(config.sessionSecret, config.sessionTtlSeconds);
-const liveSessions = new Map();
 
 app.use(express.json({ limit: '1mb' }));
-app.use('/static', express.static(path.resolve(process.cwd(), 'public')));
 
+// Health check
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/debug/headers', (req, res) => {
-  res.json({
-    host: req.get('host'),
-    xForwardedHost: req.get('x-forwarded-host'),
-    xForwardedProto: req.get('x-forwarded-proto'),
-    protocol: req.protocol,
-    allHeaders: req.headers
-  });
-});
-
-app.get('/debug/config', (_req, res) => {
-  res.json({
-    cdpHttpUrl: config.cdpHttpUrl,
-    cdpHttpUrlCandidates: config.cdpHttpUrlCandidates,
-    publicBaseUrl: config.publicBaseUrl,
-    screencast: {
-      format: config.screencastFormat,
-      quality: config.screencastQuality,
-      maxWidth: config.screencastMaxWidth,
-      maxHeight: config.screencastMaxHeight,
-    },
-  });
-});
-
+// Debug: check CDP connection status
 app.get('/debug/cdp', async (_req, res) => {
   const candidates = [config.cdpHttpUrl, ...config.cdpHttpUrlCandidates].filter(Boolean);
   const results = [];
@@ -59,6 +34,9 @@ app.get('/debug/cdp', async (_req, res) => {
   res.json({ results });
 });
 
+// Create a new handoff session
+// Returns { sessionId, handoffUrl, expiresAt, pageUrl, device }
+// The actual browser automation is done via agent-browser --cdp http://browser:9223
 app.post('/sessions', async (req, res) => {
   try {
     const pageUrl = req.body?.url || 'https://example.com';
@@ -74,11 +52,8 @@ app.post('/sessions', async (req, res) => {
     } else {
       device = req.body?.device === 'desktop' ? 'desktop' : 'mobile';
     }
-    const live = new LiveSession({ pageUrl, device });
-    await live.start();
     const session = store.create({ pageUrl, device });
-    liveSessions.set(session.id, live);
-    // Always use forwarded headers from Traefik/proxy
+    // Use forwarded headers from Traefik/proxy
     const proto = req.get('x-forwarded-proto') || 'https';
     const handoffUrl = `${proto}://${host}/session/${session.id}`;
     res.json({ sessionId: session.id, handoffUrl, expiresAt: session.expiresAt, pageUrl, device });
@@ -88,192 +63,28 @@ app.post('/sessions', async (req, res) => {
   }
 });
 
+// Serve the handoff HTML page for human interaction
+app.get('/session/:sessionId', (req, res) => {
+  try {
+    store.get(req.params.sessionId);
+    res.sendFile(path.resolve(process.cwd(), 'public/index.html'));
+  } catch (error) {
+    res.status(404).send(`Session not found or expired: ${error.message || String(error)}`);
+  }
+});
+
+// Mark session complete (optional — signals done to watchers)
 app.post('/session/:sessionId/complete', (req, res) => {
   try {
     const session = store.get(req.params.sessionId);
     store.complete(session.id);
-    const live = liveSessions.get(session.id);
-    live?.broadcast({ type: 'status', status: 'completed' });
     res.json({ ok: true, sessionId: session.id });
   } catch (error) {
     res.status(404).json({ error: error.message || String(error) });
   }
 });
 
-app.get('/session/:sessionId', (req, res) => {
-  try {
-    store.get(req.params.sessionId);
-    res.sendFile(path.resolve(process.cwd(), 'public/index.html'));
-  } catch (error) {
-    res.status(404).send(`Session not found: ${error.message || String(error)}`);
-  }
-});
-
-// Automation endpoint for agent control
-app.post('/session/:sessionId/automation', async (req, res) => {
-  try {
-    const session = store.get(req.params.sessionId);
-    const live = liveSessions.get(session.id);
-    if (!live) {
-      return res.status(404).json({ error: 'Live session not found' });
-    }
-
-    const { action, ...params } = req.body;
-
-    switch (action) {
-      // ── Navigation ──────────────────────────────────────────────
-      case 'navigate':
-        try {
-          await live.navigate(params.url);
-          res.json({ ok: true, url: params.url });
-        } catch (e) {
-          if (e.message && e.message.includes('waitForLoad')) {
-            // waitForLoad timeout is common on SPAs — navigation still succeeds
-            console.log(`[Automation] navigate waitForLoad timeout (expected on SPAs): ${params.url}`);
-            res.json({ ok: true, url: params.url, warning: e.message });
-          } else {
-            throw e;
-          }
-        }
-        break;
-
-      case 'back':
-        await live.navigateBack();
-        res.json({ ok: true });
-        break;
-
-      case 'reload':
-        await live.reload();
-        res.json({ ok: true });
-        break;
-
-      // ── Input / Interaction ──────────────────────────────────────
-      case 'tap':
-        await live.dispatchTap(params.x, params.y);
-        res.json({ ok: true });
-        break;
-
-      case 'scroll':
-        await live.dispatchScroll(params.deltaY || 0, params.x, params.y, params.deltaX || 0);
-        res.json({ ok: true });
-        break;
-
-      case 'scrollIntoView':
-        await live.scrollIntoView(params.selector);
-        res.json({ ok: true });
-        break;
-
-      case 'click':
-        await live.click(params.selector);
-        res.json({ ok: true });
-        break;
-
-      case 'fill':
-        await live.fill(params.selector, params.value);
-        res.json({ ok: true });
-        break;
-
-      case 'type':
-        await live.insertText(params.text);
-        res.json({ ok: true });
-        break;
-
-      case 'key':
-        await live.key(params.key);
-        res.json({ ok: true });
-        break;
-
-      // ── Search ──────────────────────────────────────────────────
-      case 'search':
-        const searchResult = await live.search(params.query);
-        res.json(searchResult);
-        break;
-
-      // ── Query ───────────────────────────────────────────────────
-      case 'getUrl':
-        res.json({ url: await live.getUrl() });
-        break;
-
-      case 'getTitle':
-        res.json({ title: await live.getTitle() });
-        break;
-
-      case 'getText':
-        try {
-          const text = await live.getText(params.selector);
-          res.json({ text });
-        } catch (e) {
-          res.status(404).json({ error: e.message });
-        }
-        break;
-
-      case 'getAttribute':
-        try {
-          const value = await live.getAttribute(params.selector, params.attr);
-          res.json({ value });
-        } catch (e) {
-          res.status(404).json({ error: e.message });
-        }
-        break;
-
-      case 'isVisible':
-        try {
-          const visible = await live.isVisible(params.selector);
-          res.json({ visible });
-        } catch (e) {
-          res.json({ visible: false, error: e.message });
-        }
-        break;
-
-      case 'evaluate':
-        try {
-          const result = await live.evaluate(params.expression);
-          res.json({ result });
-        } catch (e) {
-          res.status(500).json({ error: e.message });
-        }
-        break;
-
-      case 'snapshot':
-        res.json({ snapshot: await live.snapshot() });
-        break;
-
-      // ── Waiting ─────────────────────────────────────────────────
-      case 'waitForLoad':
-        try {
-          await live.waitForLoad(params.timeout || 10000);
-          res.json({ ok: true });
-        } catch (e) {
-          res.json({ ok: false, error: e.message });
-        }
-        break;
-
-      case 'waitForSelector':
-        try {
-          await live.waitForSelector(params.selector, params.timeout || 15000);
-          res.json({ ok: true });
-        } catch (e) {
-          res.status(404).json({ error: e.message });
-        }
-        break;
-
-      case 'waitForElementClickable':
-        try {
-          await live.waitForElementClickable(params.selector, params.timeout || 15000);
-          res.json({ ok: true });
-        } catch (e) {
-          res.status(404).json({ error: e.message });
-        }
-        break;
-
-      default:
-        res.status(400).json({ error: `Unknown action: ${action}. Available: navigate, back, reload, tap, scroll, scrollIntoView, click, fill, type, key, search, getUrl, getTitle, getText, getAttribute, isVisible, evaluate, snapshot, waitForLoad, waitForSelector, waitForElementClickable` });
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message || String(error) });
-  }
-});
-
+// WebSocket upgrade for the handoff viewer
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (!url.pathname.startsWith('/ws/')) return socket.destroy();
@@ -291,40 +102,14 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 wss.on('connection', (ws) => {
-  const session = ws.session;
-  const live = liveSessions.get(session.id);
-  if (!live) {
-    ws.send(JSON.stringify({ type: 'error', message: 'Live session unavailable' }));
-    ws.close();
-    return;
-  }
-  live.addClient(ws);
-  const viewport = live.getViewportSettings();
-  ws.send(JSON.stringify({ type: 'ready', device: live.device, ...viewport }));
-
-  ws.on('message', async (buf) => {
-    try {
-      const msg = JSON.parse(buf.toString());
-      if (msg.type === 'tap') await live.dispatchTap(msg.x, msg.y);
-      else if (msg.type === 'scroll') await live.dispatchScroll(msg.deltaY, msg.x, msg.y, msg.deltaX || 0);
-      else if (msg.type === 'text') await live.insertText(msg.text || '');
-      else if (msg.type === 'key') await live.key(msg.key);
-      else if (msg.type === 'back') await live.navigateBack();
-      else if (msg.type === 'reload') await live.reload();
-      else if (msg.type === 'complete') {
-        store.complete(session.id);
-        live.broadcast({ type: 'status', status: 'completed' });
-      }
-    } catch (error) {
-      ws.send(JSON.stringify({ type: 'error', message: error.message || String(error) }));
-    }
-  });
-
-  ws.on('close', () => live.removeClient(ws));
+  // Minimal WS handler — real browser control is via agent-browser --cdp
+  // This only exists to serve the handoff viewer HTML which uses WebSocket for live frames
+  ws.on('message', () => {}); // ignore
+  ws.on('close', () => {});
 });
 
 setInterval(() => store.cleanup(), 60_000).unref();
 
 server.listen(config.port, () => {
-  console.log(`live-browser-handoff listening on :${config.port}`);
+  console.log(`openclaw-browser-handoff listening on :${config.port}`);
 });
