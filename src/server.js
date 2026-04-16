@@ -117,17 +117,18 @@ app.post('/session/:sessionId/automation', async (req, res) => {
     if (!live) {
       return res.status(404).json({ error: 'Live session not found' });
     }
-    
+
     const { action, ...params } = req.body;
-    
+
     switch (action) {
+      // ── Navigation ──────────────────────────────────────────────
       case 'navigate':
         try {
           await live.navigate(params.url);
           res.json({ ok: true, url: params.url });
         } catch (e) {
-          // waitForLoad timeout is common on SPAs — navigation still succeeds
           if (e.message && e.message.includes('waitForLoad')) {
+            // waitForLoad timeout is common on SPAs — navigation still succeeds
             console.log(`[Automation] navigate waitForLoad timeout (expected on SPAs): ${params.url}`);
             res.json({ ok: true, url: params.url, warning: e.message });
           } else {
@@ -135,70 +136,138 @@ app.post('/session/:sessionId/automation', async (req, res) => {
           }
         }
         break;
-      case 'tap':
-        await live.dispatchTap(params.x, params.y);
-        res.json({ ok: true });
-        break;
-      case 'click':
-        try {
-          await live.click(params.selector);
-        } catch (e) {
-          // CDP dispatchTap fails on JS frameworks — fall back to JS .click()
-          console.log(`[Automation] CDP click failed for "${params.selector}": ${e.message}, trying JS click`);
-          try {
-            await live.evaluate(`document.querySelector("${params.selector}")?.click()`);
-          } catch (e2) {
-            throw new Error(`Click failed: CDP (${e.message}) and JS (${e2.message})`);
-          }
-        }
-        res.json({ ok: true });
-        break;
-      case 'fill':
-        await live.fill(params.selector, params.value);
-        res.json({ ok: true });
-        break;
-      case 'scroll':
-        await live.dispatchScroll(params.deltaY || 0, params.x, params.y, params.deltaX || 0);
-        res.json({ ok: true });
-        break;
-      case 'type':
-        await live.insertText(params.text);
-        res.json({ ok: true });
-        break;
-      case 'key':
-        await live.key(params.key);
-        res.json({ ok: true });
-        break;
+
       case 'back':
         await live.navigateBack();
         res.json({ ok: true });
         break;
+
       case 'reload':
         await live.reload();
         res.json({ ok: true });
         break;
-      case 'getUrl':
-        const url = await live.getUrl();
-        res.json({ url });
-        break;
-      case 'getTitle':
-        const title = await live.getTitle();
-        res.json({ title });
-        break;
-      case 'evaluate':
-        const result = await live.evaluate(params.expression);
-        res.json({ result });
-        break;
-      case 'snapshot':
-        const snapshot = await live.snapshot();
-        res.json({ snapshot });
-        break;
-      case 'waitForLoad':
-        await live.waitForLoad(params.timeout || 10000);
+
+      // ── Input / Interaction ──────────────────────────────────────
+      case 'tap':
+        await live.dispatchTap(params.x, params.y);
         res.json({ ok: true });
         break;
+
+      case 'scroll':
+        await live.dispatchScroll(params.deltaY || 0, params.x, params.y, params.deltaX || 0);
+        res.json({ ok: true });
+        break;
+
+      case 'scrollIntoView':
+        await live.scrollIntoView(params.selector);
+        res.json({ ok: true });
+        break;
+
+      case 'click':
+        await live.click(params.selector);
+        res.json({ ok: true });
+        break;
+
+      case 'fill':
+        await live.fill(params.selector, params.value);
+        res.json({ ok: true });
+        break;
+
+      case 'type':
+        await live.insertText(params.text);
+        res.json({ ok: true });
+        break;
+
+      case 'key':
+        await live.key(params.key);
+        res.json({ ok: true });
+        break;
+
+      // ── Search ──────────────────────────────────────────────────
+      case 'search':
+        const searchResult = await live.search(params.query);
+        res.json(searchResult);
+        break;
+
+      // ── Query ───────────────────────────────────────────────────
+      case 'getUrl':
+        res.json({ url: await live.getUrl() });
+        break;
+
+      case 'getTitle':
+        res.json({ title: await live.getTitle() });
+        break;
+
+      case 'getText':
+        try {
+          const text = await live.getText(params.selector);
+          res.json({ text });
+        } catch (e) {
+          res.status(404).json({ error: e.message });
+        }
+        break;
+
+      case 'getAttribute':
+        try {
+          const value = await live.getAttribute(params.selector, params.attr);
+          res.json({ value });
+        } catch (e) {
+          res.status(404).json({ error: e.message });
+        }
+        break;
+
+      case 'isVisible':
+        try {
+          const visible = await live.isVisible(params.selector);
+          res.json({ visible });
+        } catch (e) {
+          res.json({ visible: false, error: e.message });
+        }
+        break;
+
+      case 'evaluate':
+        try {
+          const result = await live.evaluate(params.expression);
+          res.json({ result });
+        } catch (e) {
+          res.status(500).json({ error: e.message });
+        }
+        break;
+
+      case 'snapshot':
+        res.json({ snapshot: await live.snapshot() });
+        break;
+
+      // ── Waiting ─────────────────────────────────────────────────
+      case 'waitForLoad':
+        try {
+          await live.waitForLoad(params.timeout || 10000);
+          res.json({ ok: true });
+        } catch (e) {
+          res.json({ ok: false, error: e.message });
+        }
+        break;
+
+      case 'waitForSelector':
+        try {
+          await live.waitForSelector(params.selector, params.timeout || 15000);
+          res.json({ ok: true });
+        } catch (e) {
+          res.status(404).json({ error: e.message });
+        }
+        break;
+
+      case 'waitForElementClickable':
+        try {
+          await live.waitForElementClickable(params.selector, params.timeout || 15000);
+          res.json({ ok: true });
+        } catch (e) {
+          res.status(404).json({ error: e.message });
+        }
+        break;
+
       default:
-        res.status(400).json({ error: `Unknown action: ${action}` });
+        res.status(400).json({ error: `Unknown action: ${action}. Available: navigate, back, reload, tap, scroll, scrollIntoView, click, fill, type, key, search, getUrl, getTitle, getText, getAttribute, isVisible, evaluate, snapshot, waitForLoad, waitForSelector, waitForElementClickable` });
     }
   } catch (error) {
     res.status(500).json({ error: error.message || String(error) });

@@ -40,10 +40,10 @@ export class LiveSession {
       ...config.cdpHttpUrlCandidates,
     ].filter(Boolean);
     const uniqueCandidates = [...new Set(candidates)];
-    
+
     console.log(`[LiveSession] Starting session for ${this.pageUrl} (device: ${this.device})`);
     console.log(`[LiveSession] CDP candidates: ${uniqueCandidates.join(', ')}`);
-    
+
     // Retry logic - browser CDP may not be immediately available
     let lastError;
     for (let attempt = 0; attempt < 30; attempt++) {
@@ -97,7 +97,7 @@ export class LiveSession {
       console.error(`[LiveSession ${this.device}] CDP command failed: ${err.message}`);
       throw err;
     }
-    
+
     // Use device-specific screencast settings
     const screencastSettings = this.device === 'desktop' ? {
       format: config.screencastFormat,
@@ -265,7 +265,7 @@ export class LiveSession {
     const role = node.role?.value || 'unknown';
     const name = node.name?.value || '';
     const value = node.value?.value || '';
-    
+
     if (name || role) {
       let line = `${indent}- ${role}`;
       if (name) line += ` "${name}"`;
@@ -273,7 +273,7 @@ export class LiveSession {
       if (node.nodeId) line += ` [nodeId: ${node.nodeId}]`;
       result.push(line);
     }
-    
+
     if (node.children) {
       for (const child of node.children) {
         result.push(...this._parseAccessibilityTree(child, depth + 1));
@@ -282,50 +282,243 @@ export class LiveSession {
     return result.join('\n');
   }
 
-  async click(selector) {
-    // Get document node
+  // --- NEW METHODS ---
+
+  /**
+   * Resolve a CSS selector to a DOM nodeId via CDP.
+   * Throws with a descriptive message if not found.
+   */
+  async _resolveSelector(selector) {
     const { root } = await this.connection.send('DOM.getDocument', {}, this.sessionId);
-    
-    // Find element by selector
     const { nodeId } = await this.connection.send('DOM.querySelector', {
       nodeId: root.nodeId,
       selector,
     }, this.sessionId);
-    
     if (!nodeId) throw new Error(`Element not found: ${selector}`);
-    
-    // Get box model for coordinates
-    const { model } = await this.connection.send('DOM.getBoxModel', { nodeId }, this.sessionId);
-    const x = (model.content[0] + model.content[2]) / 2;
-    const y = (model.content[1] + model.content[5]) / 2;
-    
-    await this.dispatchTap(x, y);
+    return nodeId;
   }
 
-  async fill(selector, value) {
-    // Get document node
-    const { root } = await this.connection.send('DOM.getDocument', {}, this.sessionId);
-    
-    // Find element by selector
-    const { nodeId } = await this.connection.send('DOM.querySelector', {
-      nodeId: root.nodeId,
-      selector,
-    }, this.sessionId);
-    
-    if (!nodeId) throw new Error(`Element not found: ${selector}`);
-    
-    // Get box model for coordinates
+  /**
+   * Get box model (coordinates) for a selector.
+   */
+  async _getBoxModel(selector) {
+    const nodeId = await this._resolveSelector(selector);
     const { model } = await this.connection.send('DOM.getBoxModel', { nodeId }, this.sessionId);
-    const x = (model.content[0] + model.content[2]) / 2;
-    const y = (model.content[1] + model.content[5]) / 2;
-    
-    // Click to focus
-    await this.dispatchTap(x, y);
-    
-    // Select all and type
+    return model;
+  }
+
+  /**
+   * Wait for an element to appear in the DOM (within timeout).
+   * Polls every 500ms.
+   */
+  async waitForSelector(selector, timeout = 15000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      try {
+        const nodeId = await this._resolveSelector(selector);
+        if (nodeId) return true;
+      } catch {}
+      await new Promise(r => setTimeout(r, 500));
+    }
+    throw new Error(`waitForSelector timeout: "${selector}" not found within ${timeout}ms`);
+  }
+
+  /**
+   * Wait for an element to be visible (rendered and not hidden).
+   * Combines DOM polling with computed-style visibility check.
+   */
+  async waitForElementClickable(selector, timeout = 15000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      try {
+        const nodeId = await this._resolveSelector(selector);
+        if (!nodeId) throw new Error('Element not found');
+        // Check visibility via JS
+        const visible = await this.evaluate(`
+          (function() {
+            const el = document.querySelector("${selector.replace(/"/g, '\\"')}");
+            if (!el) return false;
+            const style = window.getComputedStyle(el);
+            return style.display !== 'none' &&
+                   style.visibility !== 'hidden' &&
+                   style.opacity !== '0' &&
+                   el.offsetWidth > 0 &&
+                   el.offsetHeight > 0;
+          })()
+        `);
+        if (visible) return true;
+      } catch {}
+      await new Promise(r => setTimeout(r, 500));
+    }
+    throw new Error(`waitForElementClickable timeout: "${selector}" not clickable within ${timeout}ms`);
+  }
+
+  /**
+   * Get text content of an element.
+   */
+  async getText(selector) {
+    const nodeId = await this._resolveSelector(selector);
+    const { node } = await this.connection.send('DOM.describeNode', { nodeId }, this.sessionId);
+    return node.content || '';
+  }
+
+  /**
+   * Get an attribute value from an element.
+   * @param {string} selector - CSS selector
+   * @param {string} attr - Attribute name (e.g. 'href', 'src', 'data-id')
+   */
+  async getAttribute(selector, attr) {
+    const nodeId = await this._resolveSelector(selector);
+    const { node } = await this.connection.send('DOM.describeNode', { nodeId }, this.sessionId);
+    const attrs = node.attributes || [];
+    for (let i = 0; i < attrs.length; i += 2) {
+      if (attrs[i] === attr) return attrs[i + 1];
+    }
+    return null;
+  }
+
+  /**
+   * Check if an element is visible (displayed, not hidden, has size).
+   */
+  async isVisible(selector) {
+    try {
+      return await this.evaluate(`
+        (function() {
+          const el = document.querySelector("${selector.replace(/"/g, '\\"')}");
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' &&
+                 style.visibility !== 'hidden' &&
+                 style.opacity !== '0' &&
+                 el.offsetWidth > 0 &&
+                 el.offsetHeight > 0;
+        })()
+      `);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Fill an input field by first focusing it, then selecting all, then typing.
+   * Handles selectors with special characters by using evaluate().
+   */
+  async fill(selector, value) {
+    // Use evaluate to safely handle any selector chars
+    const escapedSelector = selector.replace(/"/g, '\\"');
+    const result = await this.evaluate(`
+      (function() {
+        const el = document.querySelector("${escapedSelector}");
+        if (!el) return { error: "not found" };
+        el.focus();
+        el.select ? el.select() : null;
+        return { ok: true };
+      })()
+    `);
+    if (result?.error === 'not found') throw new Error(`fill: element not found: ${selector}`);
+    // Type character by character to trigger input events
     await this.connection.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2 }, this.sessionId);
     await this.connection.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2 }, this.sessionId);
-    await this.insertText(value);
+    await this.insertText(String(value));
+  }
+
+  /**
+   * Click an element using CDP tap (mobile) or mouse (desktop).
+   * Falls back to JS .click() on Vue/React sites if CDP tap fails.
+   */
+  async click(selector) {
+    let cdpError = null;
+    try {
+      const model = await this._getBoxModel(selector);
+      const x = (model.content[0] + model.content[2]) / 2;
+      const y = (model.content[1] + model.content[5]) / 2;
+      await this.dispatchTap(x, y);
+      return;
+    } catch (e) {
+      cdpError = e.message || String(e);
+    }
+
+    // CDP tap failed — try JS .click()
+    console.log(`[LiveSession] CDP click failed for "${selector}": ${cdpError}, trying JS .click()`);
+    const escapedSelector = selector.replace(/"/g, '\\"');
+    const jsResult = await this.evaluate(`
+      (function() {
+        const el = document.querySelector("${escapedSelector}");
+        if (!el) return { error: "not found" };
+        el.click();
+        return { ok: true, text: el.textContent.trim().substring(0, 50) };
+      })()
+    `);
+
+    if (jsResult?.error === 'not found') {
+      throw new Error(`click failed: CDP (${cdpError}) and JS element not found: ${selector}`);
+    }
+    if (jsResult?.error) {
+      throw new Error(`click failed: CDP (${cdpError}) and JS (${jsResult.error})`);
+    }
+    // Success via JS
+    return;
+  }
+
+  /**
+   * Search: navigate to site's search results for a given query.
+   * Detects common search URL patterns or uses the search form.
+   */
+  async search(query) {
+    // Try common e-commerce search URL patterns first
+    const urlPatterns = [
+      `https://instar-informatika.hr/?search=${encodeURIComponent(query)}`,
+      `https://instar-informatika.hr/search?q=${encodeURIComponent(query)}`,
+      `https://instar-informatika.hr/pretraga?q=${encodeURIComponent(query)}`,
+    ];
+
+    for (const url of urlPatterns) {
+      try {
+        await this.connection.send('Page.navigate', { url }, this.sessionId);
+        await this.waitForLoad(8000);
+        const title = await this.getTitle();
+        // If we got a meaningful title (not 404), we're done
+        if (!title.includes('404') && !title.includes('error')) {
+          return { ok: true, url };
+        }
+      } catch {}
+    }
+
+    // Fallback: try to use the search input on the page
+    const searchSelectors = [
+      'input[name="q"]',
+      'input[type="search"]',
+      '#search-input',
+      '.search-input',
+      'input[placeholder*="search" i]',
+      'input[placeholder*="pretraž" i]',
+    ];
+
+    for (const sel of searchSelectors) {
+      try {
+        const found = await this.isVisible(sel);
+        if (found) {
+          await this.fill(sel, query);
+          await this.key('Enter');
+          return { ok: true };
+        }
+      } catch {}
+    }
+
+    throw new Error(`search: could not find search input or valid URL for query: ${query}`);
+  }
+
+  /**
+   * Scroll an element into view (or scroll the page if no selector).
+   */
+  async scrollIntoView(selector) {
+    const escapedSelector = selector.replace(/"/g, '\\"');
+    await this.evaluate(`
+      (function() {
+        const el = document.querySelector("${escapedSelector}");
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      })()
+    `);
   }
 
   async stop() {
