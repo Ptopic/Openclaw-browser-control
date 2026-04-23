@@ -23,7 +23,7 @@ RUN apt-get update -qqy \
 COPY package*.json ./
 
 # Install Node deps (puppeteer downloads Chromium during npm install)
-RUN npm ci
+RUN npm install
 
 # Copy application files
 COPY index.js entrypoint.sh ./
