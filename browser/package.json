@@ -1,0 +1,19 @@
+{
+  "name": "openclaw-browser-stealth",
+  "version": "1.0.0",
+  "description": "Stealth Chrome browser for Openclaw — anti-detection via puppeteer-extra-plugin-stealth",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ptopic/Openclaw-browser-control.git"
+  },
+  "author": "Petar Topic",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
